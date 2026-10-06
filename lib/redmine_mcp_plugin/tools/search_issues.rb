@@ -1,11 +1,12 @@
 # frozen_string_literal: true
+
 module RedmineMcpPlugin
   module Tools
     class SearchIssues < Tool
       FILTER_ALIASES = {
         'assigned_to' => 'assigned_to_id',
         'author' => 'author_id',
-        'fixed_version' => 'fixed_version_id'
+        'fixed_version' => 'fixed_version_id',
         'priority' => 'priority_id',
         'status' => 'status_id',
         'tracker' => 'tracker_id',
@@ -36,11 +37,11 @@ module RedmineMcpPlugin
             'values' => {
               'type' => 'array',
               'items' => { 'type' => %w[string integer number boolean] },
-              'description' => values_description
-            }
+              'description' => values_description,
+            },
           },
           'required' => %w[operator],
-          'additionalProperties' => false
+          'additionalProperties' => false,
         }
       end
       private_class_method :issue_filter_schema
@@ -116,7 +117,7 @@ module RedmineMcpPlugin
                    'issue_id' => issue_filter_schema(
                      'Issue numeric ID. Uses Numeric operators.',
                      'Numeric issue IDs. The "><" operator expects two values; omit values for "!*" and "*".'
-                   )
+                   ),
                    'priority' => issue_filter_schema(
                      'Filter by priority name. Uses History List operators.',
                      'Priority names, e.g. "High".'
@@ -294,9 +295,13 @@ module RedmineMcpPlugin
           priority: issue.priority&.name,
           author: issue.author&.name,
           assigned_to: issue.assigned_to&.name,
+          parent_id: issue.parent_id,
           done_ratio: issue.done_ratio,
+          start_date: issue.start_date&.iso8601,
+          due_date: issue.due_date&.iso8601,
           created_on: iso(issue.created_on),
-          updated_on: iso(issue.updated_on)
+          updated_on: iso(issue.updated_on),
+          closed_on: iso(issue.closed_on),
         }
       end
     end
