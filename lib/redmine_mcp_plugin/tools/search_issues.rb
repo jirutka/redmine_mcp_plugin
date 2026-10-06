@@ -1,28 +1,163 @@
 # frozen_string_literal: true
-
 module RedmineMcpPlugin
   module Tools
     class SearchIssues < Tool
+      FILTER_ALIASES = {
+        'assigned_to' => 'assigned_to_id',
+        'author' => 'author_id',
+        'fixed_version' => 'fixed_version_id'
+        'priority' => 'priority_id',
+        'status' => 'status_id',
+        'tracker' => 'tracker_id',
+      }.freeze
+
+      OPERATOR_GROUPS_DESCRIPTION =
+        'Operator groups: ' \
+        'List: "=" is one of, "!" is not one of. History List additionally supports "ev" (has been), "!ev" ' \
+        '(has never been), and "cf" (changed from). Nullable History List additionally supports "*" (any) and "!*" (none). ' \
+        'Text: "~" contains, "*~" contains any, "!~" does not contain, "^" starts with, "$" ends with, "*" is not ' \
+        'empty, "!*" is empty. ' \
+        'Date: "=" on date, ">=" on or after, "<=" on or before, "><" between, "*" is not empty, "!*" is empty; use ' \
+        'ISO dates such as "2026-10-01". ' \
+        'Numeric: "=" equals, ">=" at least, "<=" at most, "><" between, "*" is not empty, "!*" is empty. ' \
+        'Status: "o" any open, "=" is one of, "!" is not one of, "ev" has been, "!ev" has never been, "cf" changed ' \
+        'from, "c" any closed, "*" any status. ' \
+        'Native Redmine relative-date operators are also accepted, but absolute ISO dates are recommended for MCP calls.'
+
+      def self.issue_filter_schema(
+        description,
+        values_description = 'Filter values. Omit for operators that take no value.'
+      )
+        {
+          'type' => 'object',
+          'description' => description,
+          'properties' => {
+            'operator' => { 'type' => 'string' },
+            'values' => {
+              'type' => 'array',
+              'items' => { 'type' => %w[string integer number boolean] },
+              'description' => values_description
+            }
+          },
+          'required' => %w[operator],
+          'additionalProperties' => false
+        }
+      end
+      private_class_method :issue_filter_schema
+
       tool 'search_issues',
            title: 'Search issues',
-           description: 'Search issues visible to the authenticated user. All filters are optional ' \
-                        'and are combined with AND. Returns newest-updated first.',
+           description: 'Search issues visible to the authenticated user. By default only open issues are searched. ' \
+                        'Use query for subject/description text search and filters for Redmine issue-list filters; ' \
+                        'all conditions are combined with AND. Returns newest-updated first.',
            permission: :view_issues,
            schema: {
              'type' => 'object',
              'properties' => {
-               'project' => { 'type' => %w[string integer],
-                             'description' => 'Restrict to one project (identifier or numeric id).' },
-               'query' => { 'type' => 'string', 'description' => 'Case-insensitive substring matched against subject and description.' },
-               'status' => { 'type' => 'string', 'enum' => %w[open closed all],
-                             'description' => 'Issue status filter. Defaults to open.' },
-               'tracker' => { 'type' => 'string', 'description' => 'Tracker name, e.g. Bug.' },
-               'assigned_to_me' => { 'type' => 'boolean', 'description' => 'Only issues assigned to the authenticated user.' },
-               'updated_since' => { 'type' => 'string', 'format' => 'date',
-                                    'description' => 'Only issues updated on or after this ISO-8601 date.' },
-               'offset' => { 'type' => 'integer', 'minimum' => 0,
-                             'description' => 'Rows to skip, for paging past the server cap. Defaults to 0.' },
-               'limit' => { 'type' => 'integer', 'minimum' => 1, 'description' => 'Maximum issues to return.' }
+               'project' => {
+                 'type' => %w[string integer],
+                 'description' => 'Optional project context (identifier or numeric id). Restricts results to that ' \
+                                  'project by default and makes project-specific Redmine filters available.'
+               },
+               'query' => {
+                 'type' => 'string',
+                 'description' => 'Case-insensitive substring matched against issue subject and description.'
+               },
+               'filters' => {
+                 'type' => 'object',
+                 'description' =>
+                   'Redmine issue-list filters. If neither status nor the native status_id filter is supplied, ' \
+                   'only open issues are searched. Recommended human-readable filters are documented explicitly ' \
+                   'below and resolve their values using the choices Redmine exposes for the current query. Some ' \
+                   'listed filters may be unavailable in a particular project because Redmine disables fields based ' \
+                   'on project/tracker configuration or permissions. Additional native Redmine filters are accepted ' \
+                   'as additional properties, including *_id fields for callers that already know exact IDs, ' \
+                   'plugin/relation/project-specific filters, and cf_<id> custom fields. ' + OPERATOR_GROUPS_DESCRIPTION,
+                 'properties' => {
+                   'assigned_to' => issue_filter_schema(
+                     'Filter by assignee display name. Uses Nullable History List operators. ' \
+                     'Depending on configuration, assignees may include groups. Duplicate display names are rejected ' \
+                     'as ambiguous; use the native assigned_to_id filter to disambiguate. The special value "me" is ' \
+                     'also supported.',
+                     'Assignee display names, or "me". Omit values for "!*" and "*".'
+                   ),
+                   'author' => issue_filter_schema(
+                     'Filter by issue author/creator display name. Uses List operators. ' \
+                     'Duplicate display names are rejected as ambiguous; use the native author_id filter to ' \
+                     'disambiguate. The special value "me" is also supported.',
+                     'Author display names, or "me".'
+                   ),
+                   'closed_on' => issue_filter_schema(
+                     'Issue closed date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
+                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                   ),
+                   'created_on' => issue_filter_schema(
+                     'Issue creation date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
+                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                   ),
+                   'description' => issue_filter_schema(
+                     'Issue description text filter. Uses Text operators.',
+                     'Text values. Omit values for "!*" and "*".'
+                   ),
+                   'done_ratio' => issue_filter_schema(
+                     'Issue completion percentage. Uses Numeric operators.',
+                     'Numeric percentage values. The "><" operator expects two values; omit values for "!*" and "*".'
+                   ),
+                   'due_date' => issue_filter_schema(
+                     'Issue due date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
+                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                   ),
+                   'fixed_version' => issue_filter_schema(
+                     'Filter by target-version label, typically "Project - Version". Uses ' \
+                     'Nullable History List operators. Ambiguous labels are rejected; use the native ' \
+                     'fixed_version_id filter to disambiguate.',
+                     'Target-version labels. Omit values for "!*" and "*".'
+                   ),
+                   'issue_id' => issue_filter_schema(
+                     'Issue numeric ID. Uses Numeric operators.',
+                     'Numeric issue IDs. The "><" operator expects two values; omit values for "!*" and "*".'
+                   )
+                   'priority' => issue_filter_schema(
+                     'Filter by priority name. Uses History List operators.',
+                     'Priority names, e.g. "High".'
+                   ),
+                   'start_date' => issue_filter_schema(
+                     'Issue start date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
+                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                   ),
+                   'status' => issue_filter_schema(
+                     'Filter by issue status name. Uses Status operators. If omitted, only open ' \
+                     'issues are searched.',
+                     'Status names, e.g. "New" or "Resolved". Omit values for "o", "c" and "*".'
+                   ),
+                   'subject' => issue_filter_schema(
+                     'Issue subject text filter. Uses Text operators.',
+                     'Text values. Omit values for "!*" and "*".'
+                   ),
+                   'tracker' => issue_filter_schema(
+                     'Filter by tracker name. Uses History List operators.',
+                     'Tracker names, e.g. "Bug".'
+                   ),
+                   'updated_on' => issue_filter_schema(
+                     'Issue last-updated date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
+                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                   ),
+                 },
+                 'additionalProperties' => issue_filter_schema(
+                   'Additional native Redmine IssueQuery filter. Valid operators and values depend on the filter ' \
+                   'type, current project, and Redmine configuration.'
+                 )
+               },
+               'offset' => {
+                 'type' => 'integer',
+                 'minimum' => 0,
+                 'description' => 'Rows to skip, for paging past the server cap. Defaults to 0.'
+               },
+               'limit' => {
+                 'type' => 'integer',
+                 'minimum' => 1,
+                 'description' => 'Maximum issues to return.'
+               }
              },
              'additionalProperties' => false
            }
@@ -30,52 +165,122 @@ module RedmineMcpPlugin
       private
 
       def perform(arguments)
-        scope = Issue.visible(user).includes(:project, :tracker, :status, :priority, :author, :assigned_to)
+        issue_query = build_issue_query(arguments)
+        scope = issue_query.base_scope
 
+        if (needle = arguments['query'].presence)
+          pattern = "%#{ActiveRecord::Base.sanitize_sql_like(needle.to_s)}%"
+          scope = scope.where(
+            'LOWER(issues.subject) LIKE LOWER(:p) OR LOWER(issues.description) LIKE LOWER(:p)',
+            p: pattern
+          )
+        end
+
+        limit  = limit_for(arguments)
+        offset = offset_for(arguments)
+        total  = scope.count
+        rows   = scope.preload(:project, :tracker, :status, :priority, :author, :assigned_to)
+                      .reorder(updated_on: :desc)
+                      .offset(offset)
+                      .limit(limit)
+                      .map { |issue| summarise(issue) }
+        paged(total: total, offset: offset, key: :issues, rows: rows)
+      end
+
+      def build_issue_query(arguments)
+        project = nil
         if (identifier = arguments['project'].presence)
           project = fetch_project(identifier)
           # .visible already filters by role, but not by OAuth scope -- see the
           # note on Tool. This is the check that honours a narrowed token.
           authorize!(:view_issues, project)
-          scope = scope.where(project_id: project.id)
         end
 
-        scope =
-          case arguments['status'].presence&.to_s
-          when 'closed' then scope.joins(:status).where(issue_statuses: { is_closed: true })
-          when 'all'    then scope
-          # 'open', or absent. SchemaValidator has already refused anything
-          # outside the declared enum, so this no longer swallows a typo.
-          else scope.open
+        issue_query = IssueQuery.new(name: '_', project: project)
+
+        apply_filters(issue_query, arguments['filters'])
+
+        # A project-scoped IssueQuery can include subprojects depending on the
+        # Redmine setting. Keep `project` exact by default unless the caller
+        # explicitly supplied a subproject_id filter.
+        if project && issue_query.available_filters.key?('subproject_id') && !issue_query.has_filter?('subproject_id')
+          issue_query.add_filter('subproject_id', '!*')
+        end
+
+        unless issue_query.valid?
+          raise ToolError, "Invalid issue filters: #{issue_query.errors.full_messages.join('; ')}"
+        end
+
+        issue_query
+      end
+
+      def apply_filters(issue_query, filters)
+        return if filters.nil?
+
+        normalized_fields = {}
+        filters.each do |requested_field, options|
+          requested_field = requested_field.to_s
+          field = FILTER_ALIASES.fetch(requested_field, requested_field)
+          operator = options['operator'].to_s
+
+          if (previous = normalized_fields[field])
+            raise ToolError,
+                  "Issue filters #{previous.inspect} and #{requested_field.inspect} both refer to #{field.inspect}; use only one"
+          end
+          normalized_fields[field] = requested_field
+
+          filter = issue_query.available_filters[field]
+          unless filter
+            available = issue_query.available_filters.keys.join(', ')
+            raise ToolError,
+                  "Unknown or unavailable issue filter #{requested_field.inspect}. Available Redmine fields: #{available}"
           end
 
-        if (needle = arguments['query'].presence)
-          pattern = "%#{ActiveRecord::Base.sanitize_sql_like(needle.to_s)}%"
-          scope = scope.where('LOWER(issues.subject) LIKE LOWER(:p) OR LOWER(issues.description) LIKE LOWER(:p)', p: pattern)
+          allowed = Array(issue_query.class.operators_by_filter_type[filter[:type]])
+          unless allowed.include?(operator)
+            raise ToolError,
+                  "Operator #{operator.inspect} is not valid for #{requested_field.inspect}; allowed: " \
+                  "#{allowed.join(', ')}"
+          end
+
+          values = options['values']&.map(&:to_s)
+          if FILTER_ALIASES.key?(requested_field) && values&.any?(&:present?)
+            values = resolve_named_filter_values!(requested_field, field, filter, values)
+          end
+
+          issue_query.add_filter(field, operator, values)
+        end
+      end
+
+      def resolve_named_filter_values!(requested_field, redmine_field, filter, values)
+        filter_pairs = Array(filter.values).filter_map do |label, value|
+          [label.to_s, value.to_s] unless label.nil? || value.nil?
         end
 
-        if (tracker_name = arguments['tracker'].presence)
-          tracker = Tracker.find_by(name: tracker_name.to_s)
-          raise ToolError, "No tracker named #{tracker_name.inspect}" if tracker.nil?
+        accepts_me = %w[author assigned_to].include?(requested_field)
 
-          scope = scope.where(tracker_id: tracker.id)
-        end
+        values.map do |requested_value|
+          needle = requested_value.strip
+          # Redmine exposes "me" as an internal special value with a localized
+          # display label such as << me >>. Keep the natural MCP spelling.
+          matched_values = filter_pairs.select { |label, value|
+            label.casecmp?(needle) || (accepts_me && value == 'me' && needle.casecmp?('me'))
+          }.map(&:last).uniq
 
-        scope = scope.where(assigned_to_id: user.id) if arguments['assigned_to_me']
-
-        if (since = arguments['updated_since'].presence)
-          begin
-            scope = scope.where('issues.updated_on >= ?', Date.iso8601(since.to_s).beginning_of_day)
-          rescue ArgumentError
-            raise ToolError, "updated_since must be an ISO-8601 date, got #{since.inspect}"
+          case matched_values.length
+          when 1
+            matched_values.first
+          when 0
+            raise ToolError,
+                  "Unknown value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
+                  "use a display value available in Redmine or the native #{redmine_field.inspect} filter"
+          else
+            raise ToolError,
+                  "Ambiguous value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
+                  "matching Redmine values: #{matched_values.join(', ')}. Use the native #{redmine_field.inspect} " \
+                  'filter to disambiguate'
           end
         end
-
-        limit  = limit_for(arguments)
-        offset = offset_for(arguments)
-        rows   = scope.reorder(updated_on: :desc).offset(offset).limit(limit)
-                      .map { |issue| summarise(issue) }
-        paged(total: scope.count, offset: offset, key: :issues, rows: rows)
       end
 
       def summarise(issue)
