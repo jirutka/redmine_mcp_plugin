@@ -31,7 +31,8 @@ class McpControllerTest < Redmine::ControllerTest
   end
 
   def post_mcp(payload, headers = {})
-    post :handle, body: payload, as: :json, headers: headers
+    @request.headers.merge!(headers)
+    post :handle, body: payload, as: :json
   end
 
   def json_body
