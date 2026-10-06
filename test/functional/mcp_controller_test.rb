@@ -207,22 +207,26 @@ class McpControllerTest < Redmine::ControllerTest
     assert Issue.count > returned.size, 'fixture set should be larger than what one user can see'
   end
 
-  def test_search_issues_defaults_to_open_status
+  def test_search_issues_defaults_to_all_statuses
     user = User.find(2)
+    visible = Issue.visible(user)
+    closed_count = visible.joins(:status).where(issue_statuses: { is_closed: true }).count
+    assert closed_count.positive?, 'fixture set should contain at least one visible closed issue'
+
     post_mcp rpc('tools/call', { 'name' => 'search_issues', 'arguments' => {} }), api_key_headers(user)
 
     payload = json_body['result']['structuredContent']
     returned_ids = payload['issues'].map { |issue| issue['id'] }
-    assert Issue.where(id: returned_ids).joins(:status).where(issue_statuses: { is_closed: true }).none?
-    assert_equal Issue.visible(user).open.count, payload['total_count']
+    assert Issue.where(id: returned_ids).joins(:status).where(issue_statuses: { is_closed: true }).any?
+    assert_equal visible.count, payload['total_count']
   end
 
   def test_search_issues_can_filter_by_author_display_name
     user = User.find(2)
-    issue = Issue.visible(user).open.where.not(author_id: nil).first
-    assert_not_nil issue, 'fixture set should contain at least one visible open issue with an author'
+    issue = Issue.visible(user).where.not(author_id: nil).first
+    assert_not_nil issue, 'fixture set should contain at least one visible issue with an author'
     author = issue.author
-    expected = Issue.visible(user).open.where(author_id: author.id)
+    expected = Issue.visible(user).where(author_id: author.id)
 
     arguments = {
       'filters' => {
@@ -240,7 +244,7 @@ class McpControllerTest < Redmine::ControllerTest
 
   def test_search_issues_can_filter_by_author_id
     user = User.find(2)
-    author_id = Issue.visible(user).open.where.not(author_id: nil).pick(:author_id)
+    author_id = Issue.visible(user).where.not(author_id: nil).pick(:author_id)
     assert_not_nil author_id
 
     arguments = {
@@ -254,7 +258,7 @@ class McpControllerTest < Redmine::ControllerTest
     returned_ids = payload['issues'].map { |issue| issue['id'] }
     assert returned_ids.any?
     assert_equal [author_id], Issue.where(id: returned_ids).distinct.pluck(:author_id)
-    assert_equal Issue.visible(user).open.where(author_id: author_id).count, payload['total_count']
+    assert_equal Issue.visible(user).where(author_id: author_id).count, payload['total_count']
   end
 
   def test_search_issues_named_status_supports_open_operator_without_values
@@ -262,8 +266,10 @@ class McpControllerTest < Redmine::ControllerTest
     arguments = { 'filters' => { 'status' => { 'operator' => 'o' } } }
     post_mcp rpc('tools/call', { 'name' => 'search_issues', 'arguments' => arguments }), api_key_headers(user)
 
-    returned_ids = json_body['result']['structuredContent']['issues'].map { |issue| issue['id'] }
+    payload = json_body['result']['structuredContent']
+    returned_ids = payload['issues'].map { |issue| issue['id'] }
     assert Issue.where(id: returned_ids).joins(:status).where(issue_statuses: { is_closed: true }).none?
+    assert_equal Issue.visible(user).open.count, payload['total_count']
   end
 
   def test_search_issues_rejects_named_and_native_forms_of_same_filter

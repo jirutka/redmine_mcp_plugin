@@ -48,9 +48,9 @@ module RedmineMcpPlugin
 
       tool 'search_issues',
            title: 'Search issues',
-           description: 'Search issues visible to the authenticated user. By default only open issues are searched. ' \
-                        'Use query for subject/description text search and filters for Redmine issue-list filters; ' \
-                        'all conditions are combined with AND. Returns newest-updated first.',
+           description: 'Search issues visible to the authenticated user. By default issues of all statuses are ' \
+                        'searched. Use query for subject/description text search and filters for Redmine issue-list ' \
+                        'filters; all conditions are combined with AND. Returns newest-updated first.',
            permission: :view_issues,
            schema: {
              'type' => 'object',
@@ -67,13 +67,13 @@ module RedmineMcpPlugin
                'filters' => {
                  'type' => 'object',
                  'description' =>
-                   'Redmine issue-list filters. If neither status nor the native status_id filter is supplied, ' \
-                   'only open issues are searched. Recommended human-readable filters are documented explicitly ' \
-                   'below and resolve their values using the choices Redmine exposes for the current query. Some ' \
-                   'listed filters may be unavailable in a particular project because Redmine disables fields based ' \
-                   'on project/tracker configuration or permissions. Additional native Redmine filters are accepted ' \
-                   'as additional properties, including *_id fields for callers that already know exact IDs, ' \
-                   'plugin/relation/project-specific filters, and cf_<id> custom fields. ' + OPERATOR_GROUPS_DESCRIPTION,
+                   'Redmine issue-list filters. Recommended human-readable filters are documented explicitly below ' \
+                   'and resolve their values using the choices Redmine exposes for the current query. ' \
+                   'Some listed filters may be unavailable in a particular project because Redmine disables fields ' \
+                   'based on project/tracker configuration or permissions. Additional native Redmine filters are ' \
+                   'accepted as additional properties, including *_id fields for callers that already know exact IDs, ' \
+                   'plugin/relation/project-specific filters, and cf_<id> custom fields. ' + \
+                   OPERATOR_GROUPS_DESCRIPTION,
                  'properties' => {
                    'assigned_to' => issue_filter_schema(
                      'Filter by assignee display name. Uses Nullable History List operators. ' \
@@ -127,8 +127,8 @@ module RedmineMcpPlugin
                      'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
                    ),
                    'status' => issue_filter_schema(
-                     'Filter by issue status name. Uses Status operators. If omitted, only open ' \
-                     'issues are searched.',
+                     'Filter by issue status name. Uses Status operators. If omitted, issues of all statuses are ' \
+                     'searched.',
                      'Status names, e.g. "New" or "Resolved". Omit values for "o", "c" and "*".'
                    ),
                    'subject' => issue_filter_schema(
@@ -198,6 +198,9 @@ module RedmineMcpPlugin
         end
 
         issue_query = IssueQuery.new(name: '_', project: project)
+        # IssueQuery defaults to open issues. MCP search defaults to all statuses; an explicit
+        # status/status_id filter below overwrites this native status filter.
+        issue_query.add_filter('status_id', '*')
 
         apply_filters(issue_query, arguments['filters'])
 
