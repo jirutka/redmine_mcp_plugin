@@ -240,6 +240,27 @@ class McpControllerTest < Redmine::ControllerTest
     assert_equal expected.count, payload['total_count']
   end
 
+  def test_search_issues_can_filter_by_author_login
+    user = User.find(2)
+    issue = Issue.visible(user).where(author_id: User.where.not(login: '').select(:id)).first
+    assert_not_nil issue, 'fixture set should contain at least one visible issue with an author login'
+    author = issue.author
+    expected = Issue.visible(user).where(author_id: author.id)
+
+    arguments = {
+      'filters' => {
+        'author' => { 'operator' => '=', 'values' => [author.login.swapcase] }
+      }
+    }
+    post_mcp rpc('tools/call', { 'name' => 'search_issues', 'arguments' => arguments }), api_key_headers(user)
+
+    payload = json_body['result']['structuredContent']
+    returned_ids = payload['issues'].map { |result| result['id'] }
+    assert returned_ids.any?
+    assert_equal [author.id], Issue.where(id: returned_ids).distinct.pluck(:author_id)
+    assert_equal expected.count, payload['total_count']
+  end
+
   def test_search_issues_can_filter_by_author_id
     user = User.find(2)
     author_id = Issue.visible(user).where.not(author_id: nil).pick(:author_id)

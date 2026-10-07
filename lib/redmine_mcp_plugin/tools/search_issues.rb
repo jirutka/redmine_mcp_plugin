@@ -15,6 +15,7 @@ module RedmineMcpPlugin
       }.freeze
 
       NAMED_FILTERS = (FILTER_ALIASES.keys + %w[last_updated_by updated_by]).freeze
+      USER_NAMED_FILTERS = %w[assigned_to author last_updated_by updated_by watcher].freeze
 
       OPERATOR_GROUPS_DESCRIPTION =
         'Operator groups: ' \
@@ -80,17 +81,15 @@ module RedmineMcpPlugin
                    OPERATOR_GROUPS_DESCRIPTION,
                  'properties' => {
                    'assigned_to' => issue_filter_schema(
-                     'Filter by assignee display name. Uses Nullable History List operators. ' \
-                     'Depending on configuration, assignees may include groups. Duplicate display names are rejected ' \
-                     'as ambiguous; use the native assigned_to_id filter to disambiguate. The special value "me" is ' \
-                     'also supported.',
-                     'Assignee display names, or "me". Omit values for "!*" and "*".'
+                     'Filter by assignee display name or user login. Uses Nullable History List operators. ' \
+                     'Depending on configuration, assignees may include groups. Use a user login to disambiguate ' \
+                     'duplicate display names. The special value "me" is also supported.',
+                     'Assignee display names, user logins, or "me". Omit values for "!*" and "*".'
                    ),
                    'author' => issue_filter_schema(
-                     'Filter by issue author/creator display name. Uses List operators. ' \
-                     'Duplicate display names are rejected as ambiguous; use the native author_id filter to ' \
-                     'disambiguate. The special value "me" is also supported.',
-                     'Author display names, or "me".'
+                     'Filter by issue author/creator display name or login. Uses List operators. ' \
+                     'Use a login to disambiguate duplicate display names. The special value "me" is also supported.',
+                     'Author display names, logins, or "me".'
                    ),
                    'category' => issue_filter_schema(
                      'Filter by issue category name. Uses Nullable History List operators. Available only in a ' \
@@ -128,9 +127,10 @@ module RedmineMcpPlugin
                      'Numeric issue IDs. The "><" operator expects two values; omit values for "!*" and "*".'
                    ),
                    'last_updated_by' => issue_filter_schema(
-                     'Filter by the user who performed the latest visible update. Uses List operators. Duplicate ' \
-                     'display names are rejected as ambiguous. The special value "me" is also supported.',
-                     'User display names, or "me".'
+                     'Filter by the user who performed the latest visible update. Uses List operators. Accepts ' \
+                     'display names or logins; use a login to disambiguate duplicate display names. The special ' \
+                     'value "me" is also supported.',
+                     'User display names, logins, or "me".'
                    ),
                    'notes' => issue_filter_schema(
                      'Issue notes/comments text filter. Uses Text operators.',
@@ -158,19 +158,19 @@ module RedmineMcpPlugin
                      'Tracker names, e.g. "Bug".'
                    ),
                    'updated_by' => issue_filter_schema(
-                     'Filter by a user who has updated the issue. Uses List operators. Duplicate display names are ' \
-                     'rejected as ambiguous. The special value "me" is also supported.',
-                     'User display names, or "me".'
+                     'Filter by a user who has updated the issue. Uses List operators. Accepts display names or ' \
+                     'logins; use a login to disambiguate duplicate display names. The special value "me" is also ' \
+                     'supported.',
+                     'User display names, logins, or "me".'
                    ),
                    'updated_on' => issue_filter_schema(
                      'Issue last-updated date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
                      'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
                    ),
                    'watcher' => issue_filter_schema(
-                     'Filter by issue watcher display name. Uses List operators. Duplicate display names are ' \
-                     'rejected as ambiguous; use the native watcher_id filter to disambiguate. The special value ' \
-                     '"me" is also supported.',
-                     'Watcher display names, or "me".'
+                     'Filter by issue watcher display name or login. Uses List operators. Use a login to ' \
+                     'disambiguate duplicate display names. The special value "me" is also supported.',
+                     'Watcher display names, logins, or "me".'
                    ),
                  },
                  'additionalProperties' => issue_filter_schema(
@@ -296,8 +296,43 @@ module RedmineMcpPlugin
           [label.to_s, value.to_s] unless label.nil? || value.nil?
         end
 
-        values.map do |requested_value|
-          resolve_named_filter_value(requested_value, requested_field, filter_pairs)
+        if USER_NAMED_FILTERS.include?(requested_field)
+          login_pairs = user_login_pairs(filter_pairs)
+          values.map do |requested_value|
+            resolve_user_filter_value(requested_value, requested_field, filter_pairs, login_pairs)
+          end
+        else
+          values.map do |requested_value|
+            resolve_named_filter_value(requested_value, requested_field, filter_pairs)
+          end
+        end
+      end
+
+      def resolve_user_filter_value(requested_value, requested_field, filter_pairs, login_pairs)
+        needle = requested_value.strip
+
+        # Redmine exposes "me" as an internal value with a localized display label such as << me >>.
+        return 'me' if needle.casecmp?('me') && filter_pairs.any? { |_label, value| value == 'me' }
+
+        # Prefer login over display name so a login can disambiguate duplicate display names.
+        login_value = login_pairs.find { |login, _value| login.casecmp?(needle) }&.last
+        return login_value if login_value
+
+        matched_values = filter_pairs
+          .filter_map { |label, value| value if label.casecmp?(needle) }
+          .uniq
+
+        case matched_values.length
+        when 1
+          matched_values.first
+        when 0
+          raise ToolError,
+                "Unknown value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
+                'use a user display name, login, or "me"'
+        else
+          raise ToolError,
+                "Ambiguous value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
+                'use the user login to disambiguate'
         end
       end
 
@@ -305,13 +340,9 @@ module RedmineMcpPlugin
         needle = requested_value.strip
         native_field = FILTER_ALIASES.fetch(requested_field, requested_field)
 
-        accepts_me = %w[assigned_to author last_updated_by updated_by watcher].include?(requested_field)
-
-        # Redmine exposes "me" as an internal special value with a localized
-        # display label such as << me >>. Keep the natural MCP spelling.
-        matched_values = filter_pairs.select { |label, value|
-          label.casecmp?(needle) || (accepts_me && value == 'me' && needle.casecmp?('me'))
-        }.map(&:last).uniq
+        matched_values = filter_pairs
+          .filter_map { |label, value| value if label.casecmp?(needle) }
+          .uniq
 
         case matched_values.length
         when 1
@@ -325,6 +356,25 @@ module RedmineMcpPlugin
                 "Ambiguous value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
                 "matching Redmine values: #{matched_values.join(', ')}. Use the native #{native_field.inspect} " \
                 'filter to disambiguate'
+        end
+      end
+
+      # Builds login-to-native-value pairs for user choices already exposed by Redmine for this
+      # filter. Restricting the lookup to those values preserves Redmine's
+      # project/permission-specific user visibility instead of resolving arbitrary users globally by
+      # login. Non-numeric values such as "me" are ignored here.
+      #
+      # @param filter_pairs [Array<Array(String, String)>] Redmine [display label, native value] choices
+      # @return [Array<Array(String, String)>] [user login, native filter value] pairs
+      def user_login_pairs(filter_pairs)
+        user_ids = filter_pairs.filter_map do |_label, value|
+          Integer(value, exception: false)
+        end
+        logins_by_id = User.where(id: user_ids).pluck(:id, :login).to_h
+
+        filter_pairs.filter_map do |_label, value|
+          login = logins_by_id[value.to_i]
+          [login.to_s, value] if login.present?
         end
       end
 
