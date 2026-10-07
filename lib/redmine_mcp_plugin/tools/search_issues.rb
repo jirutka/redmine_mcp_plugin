@@ -35,7 +35,7 @@ module RedmineMcpPlugin
 
       def self.issue_filter_schema(
         description,
-        values_description = 'Filter values. Omit for operators that take no value.'
+        values_description = 'Array of filter values. Omit for operators that take no value.'
       )
         {
           'type' => 'object',
@@ -85,13 +85,13 @@ module RedmineMcpPlugin
                    'custom fields. ' + OPERATOR_GROUPS_DESCRIPTION,
                  'properties' => {
                    'assigned_to' => issue_filter_schema(
-                     'Filter by assignee display name or user login. Uses Nullable History List operators. ' \
-                     'Depending on configuration, assignees may include groups.',
-                     'User display names or user logins.'
+                     'Filter by assignee. Uses Nullable History List operators. Depending on configuration, ' \
+                     'assignees may include groups.',
+                     'Array of user display names, logins or "me".'
                    ),
                    'author' => issue_filter_schema(
-                     'Filter by issue author/creator display name or login. Uses List operators.',
-                     'User display names or logins.'
+                     'Filter by issue author/creator. Uses List operators.',
+                     'Array of user display names, logins or "me".'
                    ),
                    'category' => issue_filter_schema(
                      'Filter by issue category name. Uses Nullable History List operators. Available only in a ' \
@@ -130,7 +130,7 @@ module RedmineMcpPlugin
                    ),
                    'last_updated_by' => issue_filter_schema(
                      'Filter by the user who performed the latest visible update. Uses List operators.',
-                     'User display names or logins.'
+                     'Array of user display names, logins or "me".'
                    ),
                    'notes' => issue_filter_schema(
                      'Issue notes/comments text filter. Uses Text operators.',
@@ -159,15 +159,15 @@ module RedmineMcpPlugin
                    ),
                    'updated_by' => issue_filter_schema(
                      'Filter by a user who has updated the issue. Uses List operators.',
-                     'User display names or logins.'
+                     'Array of user display names, logins or "me".'
                    ),
                    'updated_on' => issue_filter_schema(
                      'Issue last-updated date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
                      'ISO date values.'
                    ),
                    'watcher' => issue_filter_schema(
-                     'Filter by issue watcher display name or login. Uses List operators.',
-                     'User display names or logins.'
+                     'Filter by a user who watches the issue. Uses List operators.',
+                     'Array of user display names, logins or "me".'
                    ),
                  },
                  'additionalProperties' => issue_filter_schema(
