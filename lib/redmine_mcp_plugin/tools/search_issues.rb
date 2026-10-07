@@ -278,41 +278,53 @@ module RedmineMcpPlugin
 
           values = options['values']&.map(&:to_s)
           if NAMED_FILTERS.include?(requested_field) && values&.any?(&:present?)
-            values = resolve_named_filter_values!(requested_field, field, filter, values)
+            values = resolve_named_filter_values(requested_field, filter, values)
           end
 
           issue_query.add_filter(field, operator, values)
         end
       end
 
-      def resolve_named_filter_values!(requested_field, redmine_field, filter, values)
+      # Resolves values supplied for a named MCP filter to native Redmine filter values (typically IDs).
+      #
+      # @param requested_field [String] MCP filter name, for example "author" or "tracker"
+      # @param filter [QueryFilter] Redmine filter definition containing the available [label, value] choices
+      # @param values [Array<String>] caller-supplied display names, logins, or other named values
+      # @return [Array<String>] native Redmine values suitable for IssueQuery#add_filter
+      def resolve_named_filter_values(requested_field, filter, values)
         filter_pairs = Array(filter.values).filter_map do |label, value|
           [label.to_s, value.to_s] unless label.nil? || value.nil?
         end
 
+        values.map do |requested_value|
+          resolve_named_filter_value(requested_value, requested_field, filter_pairs)
+        end
+      end
+
+      def resolve_named_filter_value(requested_value, requested_field, filter_pairs)
+        needle = requested_value.strip
+        native_field = "#{requested_field}_id"
+
         accepts_me = %w[assigned_to author last_updated_by updated_by watcher].include?(requested_field)
 
-        values.map do |requested_value|
-          needle = requested_value.strip
-          # Redmine exposes "me" as an internal special value with a localized
-          # display label such as << me >>. Keep the natural MCP spelling.
-          matched_values = filter_pairs.select { |label, value|
-            label.casecmp?(needle) || (accepts_me && value == 'me' && needle.casecmp?('me'))
-          }.map(&:last).uniq
+        # Redmine exposes "me" as an internal special value with a localized
+        # display label such as << me >>. Keep the natural MCP spelling.
+        matched_values = filter_pairs.select { |label, value|
+          label.casecmp?(needle) || (accepts_me && value == 'me' && needle.casecmp?('me'))
+        }.map(&:last).uniq
 
-          case matched_values.length
-          when 1
-            matched_values.first
-          when 0
-            raise ToolError,
-                  "Unknown value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
-                  "use a display value available in Redmine or the native #{redmine_field.inspect} filter"
-          else
-            raise ToolError,
-                  "Ambiguous value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
-                  "matching Redmine values: #{matched_values.join(', ')}. Use the native #{redmine_field.inspect} " \
-                  'filter to disambiguate'
-          end
+        case matched_values.length
+        when 1
+          matched_values.first
+        when 0
+          raise ToolError,
+                "Unknown value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
+                "use a display value available in Redmine or the native #{native_field.inspect} filter"
+        else
+          raise ToolError,
+                "Ambiguous value #{requested_value.inspect} for issue filter #{requested_field.inspect}; " \
+                "matching Redmine values: #{matched_values.join(', ')}. Use the native #{native_field.inspect} " \
+                'filter to disambiguate'
         end
       end
 
