@@ -20,15 +20,18 @@ module RedmineMcpPlugin
       OPERATOR_GROUPS_DESCRIPTION =
         'Operator groups: ' \
         'List: "=" is one of, "!" is not one of. History List additionally supports "ev" (has been), "!ev" ' \
-        '(has never been), and "cf" (changed from). Nullable History List additionally supports "*" (any) and "!*" (none). ' \
+        '(has never been), and "cf" (changed from). Nullable History List additionally supports "*" (any) and "!*" ' \
+        '(none); omit values for "*" and "!*". ' \
         'Text: "~" contains, "*~" contains any, "!~" does not contain, "^" starts with, "$" ends with, "*" is not ' \
-        'empty, "!*" is empty. ' \
-        'Date: "=" on date, ">=" on or after, "<=" on or before, "><" between, "*" is not empty, "!*" is empty; use ' \
-        'ISO dates such as "2026-10-01". ' \
-        'Numeric: "=" equals, ">=" at least, "<=" at most, "><" between, "*" is not empty, "!*" is empty. ' \
+        'empty, "!*" is empty; omit values for "*" and "!*". ' \
+        'Date: "=" on date, ">=" on or after, "<=" on or before, "><" between, "*" is not empty, "!*" is empty; ' \
+        '"><" expects two values and "*" / "!*" take no values; use ISO dates such as "2026-10-01". ' \
+        'Numeric: "=" equals, ">=" at least, "<=" at most, "><" between, "*" is not empty, "!*" is empty; ' \
+        '"><" expects two values and "*" / "!*" take no values. ' \
         'Status: "o" any open, "=" is one of, "!" is not one of, "ev" has been, "!ev" has never been, "cf" changed ' \
-        'from, "c" any closed, "*" any status. ' \
-        'Native Redmine relative-date operators are also accepted, but absolute ISO dates are recommended for MCP calls.'
+        'from, "c" any closed, "*" any status; omit values for "o", "c" and "*". ' \
+        'Native Redmine relative-date operators are also accepted, but absolute ISO dates are recommended for ' \
+        'MCP calls.'
 
       def self.issue_filter_schema(
         description,
@@ -75,66 +78,63 @@ module RedmineMcpPlugin
                    'Redmine issue-list filters. Recommended human-readable filters are documented explicitly below ' \
                    'and resolve their values using the choices Redmine exposes for the current query. ' \
                    'Some listed filters may be unavailable in a particular project because Redmine disables fields ' \
-                   'based on project/tracker configuration or permissions. Additional native Redmine filters are ' \
-                   'accepted as additional properties, including *_id fields for callers that already know exact IDs, ' \
-                   'plugin/relation/project-specific filters, and cf_<id> custom fields. ' + \
-                   OPERATOR_GROUPS_DESCRIPTION,
+                   'based on project/tracker configuration or permissions. User filters accept display names, ' \
+                   'logins, and the special value "me"; use a login to disambiguate duplicate display names. ' \
+                   'Additional native Redmine filters are accepted as additional properties, including *_id fields ' \
+                   'for callers that already know exact IDs, plugin/relation/project-specific filters, and cf_<id> ' \
+                   'custom fields. ' + OPERATOR_GROUPS_DESCRIPTION,
                  'properties' => {
                    'assigned_to' => issue_filter_schema(
                      'Filter by assignee display name or user login. Uses Nullable History List operators. ' \
-                     'Depending on configuration, assignees may include groups. Use a user login to disambiguate ' \
-                     'duplicate display names. The special value "me" is also supported.',
-                     'Assignee display names, user logins, or "me". Omit values for "!*" and "*".'
+                     'Depending on configuration, assignees may include groups.',
+                     'User display names or user logins.'
                    ),
                    'author' => issue_filter_schema(
-                     'Filter by issue author/creator display name or login. Uses List operators. ' \
-                     'Use a login to disambiguate duplicate display names. The special value "me" is also supported.',
-                     'Author display names, logins, or "me".'
+                     'Filter by issue author/creator display name or login. Uses List operators.',
+                     'User display names or logins.'
                    ),
                    'category' => issue_filter_schema(
                      'Filter by issue category name. Uses Nullable History List operators. Available only in a ' \
                      'project context.',
-                     'Category names. Omit values for "!*" and "*".'
+                     'Category names.'
                    ),
                    'closed_on' => issue_filter_schema(
                      'Issue closed date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
-                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                     'ISO date values.'
                    ),
                    'created_on' => issue_filter_schema(
                      'Issue creation date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
-                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                     'ISO date values.'
                    ),
                    'description' => issue_filter_schema(
                      'Issue description text filter. Uses Text operators.',
-                     'Text values. Omit values for "!*" and "*".'
+                     'Text values.'
                    ),
                    'done_ratio' => issue_filter_schema(
                      'Issue completion percentage. Uses Numeric operators.',
-                     'Numeric percentage values. The "><" operator expects two values; omit values for "!*" and "*".'
+                     'Numeric percentage values.'
                    ),
                    'due_date' => issue_filter_schema(
                      'Issue due date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
-                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                     'ISO date values.'
                    ),
                    'fixed_version' => issue_filter_schema(
                      'Filter by target-version label, typically "Project - Version". Uses ' \
                      'Nullable History List operators. Ambiguous labels are rejected; use the native ' \
                      'fixed_version_id filter to disambiguate.',
-                     'Target-version labels. Omit values for "!*" and "*".'
+                     'Target-version labels.'
                    ),
                    'issue_id' => issue_filter_schema(
                      'Issue numeric ID. Uses Numeric operators.',
-                     'Numeric issue IDs. The "><" operator expects two values; omit values for "!*" and "*".'
+                     'Numeric issue IDs.'
                    ),
                    'last_updated_by' => issue_filter_schema(
-                     'Filter by the user who performed the latest visible update. Uses List operators. Accepts ' \
-                     'display names or logins; use a login to disambiguate duplicate display names. The special ' \
-                     'value "me" is also supported.',
-                     'User display names, logins, or "me".'
+                     'Filter by the user who performed the latest visible update. Uses List operators.',
+                     'User display names or logins.'
                    ),
                    'notes' => issue_filter_schema(
                      'Issue notes/comments text filter. Uses Text operators.',
-                     'Text values. Omit values for "!*" and "*".'
+                     'Text values.'
                    ),
                    'priority' => issue_filter_schema(
                      'Filter by priority name. Uses History List operators.',
@@ -142,35 +142,32 @@ module RedmineMcpPlugin
                    ),
                    'start_date' => issue_filter_schema(
                      'Issue start date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
-                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                     'ISO date values.'
                    ),
                    'status' => issue_filter_schema(
                      'Filter by issue status name. Uses Status operators. If omitted, issues of all statuses are ' \
                      'searched.',
-                     'Status names, e.g. "New" or "Resolved". Omit values for "o", "c" and "*".'
+                     'Status names, e.g. "New" or "Resolved".'
                    ),
                    'subject' => issue_filter_schema(
                      'Issue subject text filter. Uses Text operators.',
-                     'Text values. Omit values for "!*" and "*".'
+                     'Text values.'
                    ),
                    'tracker' => issue_filter_schema(
                      'Filter by tracker name. Uses History List operators.',
                      'Tracker names, e.g. "Bug".'
                    ),
                    'updated_by' => issue_filter_schema(
-                     'Filter by a user who has updated the issue. Uses List operators. Accepts display names or ' \
-                     'logins; use a login to disambiguate duplicate display names. The special value "me" is also ' \
-                     'supported.',
-                     'User display names, logins, or "me".'
+                     'Filter by a user who has updated the issue. Uses List operators.',
+                     'User display names or logins.'
                    ),
                    'updated_on' => issue_filter_schema(
                      'Issue last-updated date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
-                     'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                     'ISO date values.'
                    ),
                    'watcher' => issue_filter_schema(
-                     'Filter by issue watcher display name or login. Uses List operators. Use a login to ' \
-                     'disambiguate duplicate display names. The special value "me" is also supported.',
-                     'Watcher display names, logins, or "me".'
+                     'Filter by issue watcher display name or login. Uses List operators.',
+                     'User display names or logins.'
                    ),
                  },
                  'additionalProperties' => issue_filter_schema(
