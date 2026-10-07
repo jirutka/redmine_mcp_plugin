@@ -6,11 +6,15 @@ module RedmineMcpPlugin
       FILTER_ALIASES = {
         'assigned_to' => 'assigned_to_id',
         'author' => 'author_id',
+        'category' => 'category_id',
         'fixed_version' => 'fixed_version_id',
         'priority' => 'priority_id',
         'status' => 'status_id',
         'tracker' => 'tracker_id',
+        'watcher' => 'watcher_id',
       }.freeze
+
+      NAMED_FILTERS = (FILTER_ALIASES.keys + %w[last_updated_by updated_by]).freeze
 
       OPERATOR_GROUPS_DESCRIPTION =
         'Operator groups: ' \
@@ -88,6 +92,11 @@ module RedmineMcpPlugin
                      'disambiguate. The special value "me" is also supported.',
                      'Author display names, or "me".'
                    ),
+                   'category' => issue_filter_schema(
+                     'Filter by issue category name. Uses Nullable History List operators. Available only in a ' \
+                     'project context.',
+                     'Category names. Omit values for "!*" and "*".'
+                   ),
                    'closed_on' => issue_filter_schema(
                      'Issue closed date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
                      'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
@@ -118,6 +127,15 @@ module RedmineMcpPlugin
                      'Issue numeric ID. Uses Numeric operators.',
                      'Numeric issue IDs. The "><" operator expects two values; omit values for "!*" and "*".'
                    ),
+                   'last_updated_by' => issue_filter_schema(
+                     'Filter by the user who performed the latest visible update. Uses List operators. Duplicate ' \
+                     'display names are rejected as ambiguous. The special value "me" is also supported.',
+                     'User display names, or "me".'
+                   ),
+                   'notes' => issue_filter_schema(
+                     'Issue notes/comments text filter. Uses Text operators.',
+                     'Text values. Omit values for "!*" and "*".'
+                   ),
                    'priority' => issue_filter_schema(
                      'Filter by priority name. Uses History List operators.',
                      'Priority names, e.g. "High".'
@@ -139,9 +157,20 @@ module RedmineMcpPlugin
                      'Filter by tracker name. Uses History List operators.',
                      'Tracker names, e.g. "Bug".'
                    ),
+                   'updated_by' => issue_filter_schema(
+                     'Filter by a user who has updated the issue. Uses List operators. Duplicate display names are ' \
+                     'rejected as ambiguous. The special value "me" is also supported.',
+                     'User display names, or "me".'
+                   ),
                    'updated_on' => issue_filter_schema(
                      'Issue last-updated date. Uses Date operators. Prefer absolute ISO dates such as "2026-10-01".',
                      'ISO date values. The "><" operator expects two values; omit values for "!*" and "*".'
+                   ),
+                   'watcher' => issue_filter_schema(
+                     'Filter by issue watcher display name. Uses List operators. Duplicate display names are ' \
+                     'rejected as ambiguous; use the native watcher_id filter to disambiguate. The special value ' \
+                     '"me" is also supported.',
+                     'Watcher display names, or "me".'
                    ),
                  },
                  'additionalProperties' => issue_filter_schema(
@@ -248,7 +277,7 @@ module RedmineMcpPlugin
           end
 
           values = options['values']&.map(&:to_s)
-          if FILTER_ALIASES.key?(requested_field) && values&.any?(&:present?)
+          if NAMED_FILTERS.include?(requested_field) && values&.any?(&:present?)
             values = resolve_named_filter_values!(requested_field, field, filter, values)
           end
 
@@ -261,7 +290,7 @@ module RedmineMcpPlugin
           [label.to_s, value.to_s] unless label.nil? || value.nil?
         end
 
-        accepts_me = %w[author assigned_to].include?(requested_field)
+        accepts_me = %w[assigned_to author last_updated_by updated_by watcher].include?(requested_field)
 
         values.map do |requested_value|
           needle = requested_value.strip
