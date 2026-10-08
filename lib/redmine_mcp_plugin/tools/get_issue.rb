@@ -1,5 +1,4 @@
 # frozen_string_literal: true
-
 module RedmineMcpPlugin
   module Tools
     class GetIssue < Tool
@@ -49,10 +48,18 @@ module RedmineMcpPlugin
           updated_on: iso(issue.updated_on),
           custom_fields: visible_custom_fields(issue)
         }
-
+        if issue_tags_visible?(issue)
+          payload[:tags] = issue.tags.map { |tag| tag.respond_to?(:name) ? tag.name : tag.to_s }
+        end
         include_journals = arguments.fetch('include_journals', true)
         payload[:journals] = journals_for(issue) if include_journals
         payload
+      end
+
+      # Additional Tags adds Issue#tags and gates access with :view_issue_tags.
+      # Omit the field entirely when the plugin is absent or the caller cannot view tags.
+      def issue_tags_visible?(issue)
+        Redmine::Plugin.installed?(:additional_tags) && user.allowed_to?(:view_issue_tags, issue.project)
       end
 
       # Issue#visible_custom_field_values applies per-field role visibility.
