@@ -14,7 +14,7 @@ module RedmineMcpPlugin
         'watcher' => 'watcher_id',
       }.freeze
 
-      NAMED_FILTERS = (FILTER_ALIASES.keys + %w[last_updated_by updated_by]).freeze
+      NAMED_FILTERS = (FILTER_ALIASES.keys + %w[last_updated_by tags updated_by]).freeze
       USER_NAMED_FILTERS = %w[assigned_to author last_updated_by updated_by watcher].freeze
 
       OPERATOR_GROUPS_DESCRIPTION =
@@ -53,6 +53,11 @@ module RedmineMcpPlugin
         }
       end
       private_class_method :issue_filter_schema
+
+      # Returns true if additional_tags plugin is installed and active.
+      def self.tags_enabled?
+        defined?(AdditionalTags) && AdditionalTags.setting?(:active_issue_tags)
+      end
 
       tool 'search_issues',
            title: 'Search issues',
@@ -169,6 +174,15 @@ module RedmineMcpPlugin
                      'Filter by a user who watches the issue. Uses List operators.',
                      'Array of user display names, logins or "me".'
                    ),
+                   **(
+                     tags_enabled? ? {
+                       'tags' => issue_filter_schema(
+                         'Filter by issue tag name. Available only where the caller has permission to view issue ' \
+                         'tags. Supports "=", "!", "*" and "!*" operators.',
+                         'Tag names.'
+                       )
+                     } : {}
+                   ),
                  },
                  'additionalProperties' => issue_filter_schema(
                    'Additional native Redmine IssueQuery filter. Valid operators and values depend on the filter ' \
@@ -206,11 +220,14 @@ module RedmineMcpPlugin
         limit  = limit_for(arguments)
         offset = offset_for(arguments)
         total  = scope.count
-        rows   = scope.preload(:project, :tracker, :status, :priority, :author, :assigned_to)
-                      .reorder(updated_on: :desc)
-                      .offset(offset)
-                      .limit(limit)
-                      .map { |issue| summarise(issue) }
+
+        preloads = %i[project tracker status priority author assigned_to]
+        preloads << :tags if self.class.tags_enabled?
+        rows = scope.preload(*preloads)
+                    .reorder(updated_on: :desc)
+                    .offset(offset)
+                    .limit(limit)
+                    .map { |issue| summarise(issue) }
         paged(total: total, offset: offset, key: :issues, rows: rows)
       end
 
@@ -376,7 +393,7 @@ module RedmineMcpPlugin
       end
 
       def summarise(issue)
-        {
+        summary = {
           id: issue.id,
           subject: issue.subject,
           project: issue.project&.name,
@@ -394,6 +411,11 @@ module RedmineMcpPlugin
           updated_on: iso(issue.updated_on),
           closed_on: iso(issue.closed_on),
         }
+        if self.class.tags_enabled? && user.allowed_to?(:view_issue_tags, issue.project)
+          summary[:tags] = issue.tags.map(&:name)
+        end
+
+        summary
       end
     end
   end

@@ -42,6 +42,20 @@ class McpControllerTest < Redmine::ControllerTest
     { 'X-Redmine-API-Key' => user.api_key }
   end
 
+  def additional_tags_enabled?
+    defined?(AdditionalTags) && AdditionalTags.setting?(:active_issue_tags)
+  end
+
+  def require_additional_tags
+    skip 'additional_tags with issue tags enabled is required' unless additional_tags_enabled?
+  end
+
+  def tag_issue(issue, tag_name)
+    issue.tag_list = [tag_name]
+    issue.save!
+    issue.reload
+  end
+
   # --- endpoint gating ---------------------------------------------------
 
   def test_endpoint_is_off_until_enabled
@@ -327,6 +341,55 @@ class McpControllerTest < Redmine::ControllerTest
 
     assert json_body['result']['isError']
     assert_match(/Unknown or unavailable issue filter/, json_body['result']['content'].first['text'])
+  end
+
+  def test_search_issues_schema_exposes_tags_only_when_additional_tags_is_enabled
+    post_mcp rpc('tools/list'), api_key_headers(User.find(1))
+
+    search_tool = json_body['result']['tools'].find { |tool| tool['name'] == 'search_issues' }
+    filters = search_tool.dig('inputSchema', 'properties', 'filters', 'properties')
+
+    if additional_tags_enabled?
+      assert_includes filters, 'tags'
+    else
+      assert_not_includes filters, 'tags'
+    end
+  end
+
+  def test_search_issues_can_filter_by_tag_and_returns_tags
+    require_additional_tags
+
+    user = User.find(1)
+    issue = Issue.visible(user).first
+    tag_name = "mcp-search-tag-#{issue.id}"
+    tag_issue(issue, tag_name)
+
+    arguments = {
+      'project' => issue.project.identifier,
+      'filters' => {
+        'tags' => { 'operator' => '=', 'values' => [tag_name.swapcase] }
+      }
+    }
+    post_mcp rpc('tools/call', { 'name' => 'search_issues', 'arguments' => arguments }), api_key_headers(user)
+
+    payload = json_body['result']['structuredContent']
+    assert_equal [issue.id], payload['issues'].map { |result| result['id'] }
+    assert_equal [tag_name], payload['issues'].first['tags']
+    assert_equal 1, payload['total_count']
+  end
+
+  def test_get_issue_returns_tags_when_additional_tags_is_enabled
+    require_additional_tags
+
+    user = User.find(1)
+    issue = Issue.visible(user).first
+    tag_name = "mcp-get-tag-#{issue.id}"
+    tag_issue(issue, tag_name)
+
+    post_mcp rpc('tools/call', { 'name' => 'get_issue', 'arguments' => { 'id' => issue.id } }), api_key_headers(user)
+
+    payload = json_body['result']['structuredContent']
+    assert_equal [tag_name], payload['tags']
   end
 
   def test_search_issues_filters_are_validated_against_json_schema
